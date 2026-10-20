@@ -29,36 +29,79 @@ const saveOrder = async (order: any, userId?: string) => {
   const { error } = await supabase.from('orders').upsert({ id: order.id, user_id: owner, data: JSON.stringify(order) });
   if (error) throw error;
 };
+
 const saveRows = async (table: string, items: any[]) => {
-  // Upsert submitted rows instead of clearing the whole table first. A failed
-  // request can no longer wipe every service/order/portfolio item.
   if (table === 'coupons') {
-    const values = items.map((x: any) => ({ id: x.id || uid(), code: x.code || '', discount: Number(x.discount || 0), active: x.active !== false }));
+    const values = items.map((x: any) => ({
+      id: x.id || uid(),
+      code: x.code || '',
+      discount: Number(x.discount || 0),
+      active: x.active !== false,
+    }));
+
     if (values.length) {
-      const { error } = await supabase.from(table).upsert(values, { onConflict: 'id' });
+      const { error } = await supabase
+        .from(table)
+        .upsert(values, { onConflict: 'id' });
+
       if (error) throw error;
     }
     return;
   }
-  const values = items.map((x: any) => table === 'orders'
-    ? { id: x.id, user_id: x.userId || '', data: JSON.stringify(x) }
-    : { id: x.id, user_id: x.userId || undefined, data: JSON.stringify(x) });
+
+  // Tabel services memakai kolom id dan data saja.
+  // Tabel lain tetap menggunakan struktur masing-masing.
+  const values = items.map((x: any) => {
+    if (table === 'services') {
+      return {
+        id: String(x.id),
+        data: JSON.stringify(x),
+      };
+    }
+
+    if (table === 'orders') {
+      return {
+        id: x.id,
+        user_id: x.userId || '',
+        data: JSON.stringify(x),
+      };
+    }
+
+    return {
+      id: x.id,
+      user_id: x.userId || undefined,
+      data: JSON.stringify(x),
+    };
+  });
+
   if (values.length) {
-    const { error } = await supabase.from(table).upsert(values, { onConflict: 'id' });
+    const { error } = await supabase
+      .from(table)
+      .upsert(values, { onConflict: 'id' });
+
     if (error) throw error;
   }
-  // The artist editor submits the complete current collection. For collections
-  // managed as a full list, remove rows omitted from that collection so deletes
-  // remain deleted after refresh. Never synchronize orders this way: they are
-  // customer-owned records and must not be removed by a stale client snapshot.
+
+  // Sinkronkan koleksi yang dikirim lengkap agar item yang dihapus
+  // dari editor tidak muncul kembali setelah halaman di-refresh.
   if (['services', 'portfolio', 'reviews'].includes(table)) {
     const ids = values.map((x: any) => x.id).filter(Boolean);
+
     let query = supabase.from(table).delete();
-    if (ids.length) query = query.not('id', 'in', `(${ids.map((id: string) => `"${String(id).replace(/"/g, '')}"`).join(',')})`);
+
+    if (ids.length) {
+      query = query.not(
+        'id',
+        'in',
+        `(${ids.map((id: string) => `"${String(id).replace(/"/g, '')}"`).join(',')})`
+      );
+    }
+
     const { error } = await query;
     if (error) throw error;
   }
 };
+
 
 export async function GET(req: NextRequest) {
   try {
